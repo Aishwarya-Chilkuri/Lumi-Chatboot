@@ -54,4 +54,3 @@ public class ChatController {
         return String.valueOf(part.get("text"));
     }
 }
-

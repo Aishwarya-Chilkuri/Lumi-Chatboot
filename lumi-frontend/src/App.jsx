@@ -1,33 +1,229 @@
-import { useState } from "react";
+
+import { useEffect, useRef, useState } from "react";
 import {
+  ArrowUp,
+  Apple,
   Copy,
+  LogOut,
+  Menu,
+  MessageSquare,
   Moon,
   Plus,
-  Send,
-  Sun,
   Sparkles,
-  Menu,
+  Sun,
+  Trash2,
   X
 } from "lucide-react";
 
 function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState([]);
+  const [chats, setChats] = useState([]);
+  const [activeChatId, setActiveChatId] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [darkMode, setDarkMode] = useState(true);
+  const [darkMode, setDarkMode] = useState(
+    localStorage.getItem("lumi-theme") !== "light"
+  );
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [user, setUser] = useState(null);
 
-  const sendMessage = async () => {
-    if (!message.trim() || loading) return;
+  const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
 
-    const userMessage = message.trim();
+  const activeChat = chats.find((chat) => chat.id === activeChatId);
+  const messages = activeChat?.messages || [];
 
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: userMessage }
-    ]);
+  useEffect(() => {
+    fetch("http://localhost:8080/api/user", {
+      credentials: "include"
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("Not logged in");
+        }
+
+        return response.json();
+      })
+      .then((data) => {
+        localStorage.setItem("lumi-user", "true");
+        setUser(data);
+        setIsLoggedIn(true);
+      })
+      .catch(() => {
+        localStorage.removeItem("lumi-user");
+        setUser(null);
+        setIsLoggedIn(false);
+      })
+      .finally(() => {
+        setCheckingAuth(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    const savedChats = localStorage.getItem("lumi-chats");
+
+    if (savedChats) {
+      try {
+        const parsedChats = JSON.parse(savedChats);
+        setChats(parsedChats);
+
+        if (parsedChats.length > 0) {
+          setActiveChatId(parsedChats[0].id);
+        }
+      } catch {
+        localStorage.removeItem("lumi-chats");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("lumi-chats", JSON.stringify(chats));
+  }, [chats]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "lumi-theme",
+      darkMode ? "dark" : "light"
+    );
+  }, [darkMode]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "end"
+    });
+  }, [messages, loading]);
+
+  const loginWithGoogle = () => {
+    window.location.href =
+      "http://localhost:8080/oauth2/authorization/google";
+  };
+
+  const loginWithApple = () => {
+    alert(
+      "Apple Sign-In needs Apple Developer configuration before it can be used."
+    );
+  };
+
+  const loginAsGuest = () => {
+    localStorage.setItem("lumi-user", "true");
+    setIsLoggedIn(true);
+    setUser({
+      name: "Lumi Guest",
+      email: "guest@lumi.local"
+    });
+  };
+
+  const logout = async () => {
+    try {
+      await fetch("http://localhost:8080/logout", {
+        method: "POST",
+        credentials: "include"
+      });
+    } catch {
+      return;
+    }
+
+    localStorage.removeItem("lumi-user");
+    setUser(null);
+    setIsLoggedIn(false);
+    setChats([]);
+    setActiveChatId(null);
+  };
+
+  const createChat = () => {
+    const newChat = {
+      id: Date.now(),
+      title: "New conversation",
+      messages: []
+    };
+
+    setChats((prev) => [newChat, ...prev]);
+    setActiveChatId(newChat.id);
+    setMessage("");
+    setSidebarOpen(false);
+  };
+
+  const selectChat = (id) => {
+    setActiveChatId(id);
+    setMessage("");
+    setSidebarOpen(false);
+  };
+
+  const deleteChat = (id) => {
+    setChats((prev) => {
+      const updatedChats = prev.filter((chat) => chat.id !== id);
+
+      if (id === activeChatId) {
+        setActiveChatId(
+          updatedChats.length > 0 ? updatedChats[0].id : null
+        );
+      }
+
+      return updatedChats;
+    });
+  };
+
+  const sendMessage = async (text = message) => {
+    const userMessage = text.trim();
+
+    if (!userMessage || loading) {
+      return;
+    }
+
+    let chatId = activeChatId;
+
+    if (!chatId) {
+      chatId = Date.now();
+
+      const newChat = {
+        id: chatId,
+        title:
+          userMessage.length > 35
+            ? `${userMessage.slice(0, 35)}...`
+            : userMessage,
+        messages: [
+          {
+            role: "user",
+            content: userMessage
+          }
+        ]
+      };
+
+      setChats((prev) => [newChat, ...prev]);
+      setActiveChatId(chatId);
+    } else {
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.id === chatId
+            ? {
+                ...chat,
+                title:
+                  chat.messages.length === 0
+                    ? userMessage.length > 35
+                      ? `${userMessage.slice(0, 35)}...`
+                      : userMessage
+                    : chat.title,
+                messages: [
+                  ...chat.messages,
+                  {
+                    role: "user",
+                    content: userMessage
+                  }
+                ]
+              }
+            : chat
+        )
+      );
+    }
 
     setMessage("");
+
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
+
     setLoading(true);
 
     try {
@@ -36,59 +232,152 @@ function App() {
         headers: {
           "Content-Type": "application/json"
         },
+        credentials: "include",
         body: JSON.stringify({
           message: userMessage
         })
       });
 
       if (!response.ok) {
-        throw new Error("Failed");
+        throw new Error("Request failed");
       }
 
       const data = await response.text();
 
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: data }
-      ]);
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.id === chatId
+            ? {
+                ...chat,
+                messages: [
+                  ...chat.messages,
+                  {
+                    role: "assistant",
+                    content: data
+                  }
+                ]
+              }
+            : chat
+        )
+      );
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "Sorry, something went wrong. Please try again."
-        }
-      ]);
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.id === chatId
+            ? {
+                ...chat,
+                messages: [
+                  ...chat.messages,
+                  {
+                    role: "assistant",
+                    content:
+                      "Sorry, I couldn't connect to Lumi right now. Please make sure the backend is running and try again."
+                  }
+                ]
+              }
+            : chat
+        )
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
+  const handleKeyDown = (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
       sendMessage();
     }
   };
 
-  const newChat = () => {
-    setMessages([]);
-    setMessage("");
+  const handleInput = (event) => {
+    setMessage(event.target.value);
+
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(
+        textareaRef.current.scrollHeight,
+        140
+      )}px`;
+    }
   };
 
   const copyMessage = async (content) => {
-    await navigator.clipboard.writeText(content);
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch {
+      return;
+    }
   };
 
   const suggestions = [
-    "Explain Java in simple words",
+    "Explain Spring Boot in simple words",
     "Help me write Java code",
-    "What is Spring Boot?",
+    "What is machine learning?",
     "Give me interview questions"
   ];
 
+  if (checkingAuth) {
+    return (
+      <div className={`loading-page ${darkMode ? "dark" : "light"}`}>
+        <div className="loading-logo">
+          <Sparkles size={25} />
+        </div>
+        <div className="loading-title">Lumi</div>
+        <div className="loading-text">Loading your workspace...</div>
+      </div>
+    );
+  }
+
+  if (!isLoggedIn) {
+    return (
+      <div className={`auth-page ${darkMode ? "dark" : "light"}`}>
+        <div className="auth-decoration auth-decoration-one" />
+        <div className="auth-decoration auth-decoration-two" />
+
+        <div className="auth-card">
+          <div className="auth-logo">
+            <Sparkles size={25} />
+          </div>
+
+          <div className="auth-brand">Lumi</div>
+
+          <h1>Welcome to Lumi</h1>
+
+          <p>
+            Your personal AI assistant for ideas, learning,
+            coding and everyday questions.
+          </p>
+
+          <button className="google-login" onClick={loginWithGoogle}>
+            <span className="google-icon">G</span>
+            Continue with Google
+          </button>
+
+          <button className="apple-login" onClick={loginWithApple}>
+            <Apple size={19} />
+            Continue with Apple
+          </button>
+
+          <div className="auth-divider">
+            <span>or</span>
+          </div>
+
+          <button className="guest-login" onClick={loginAsGuest}>
+            Continue as Guest
+            <ArrowUp size={17} />
+          </button>
+
+          <small>
+            By continuing, you agree to use Lumi responsibly.
+          </small>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={darkMode ? "app dark" : "app light"}>
+    <div className={`app ${darkMode ? "dark" : "light"}`}>
       {sidebarOpen && (
         <div
           className="mobile-overlay"
@@ -97,59 +386,91 @@ function App() {
       )}
 
       <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
-        <div className="sidebar-top">
+        <div className="sidebar-header">
           <div className="brand">
-            <div className="brand-icon">
-              <Sparkles size={21} />
+            <div className="brand-logo">
+              <Sparkles size={18} />
             </div>
 
             <div>
               <h1>Lumi</h1>
               <span>AI Assistant</span>
             </div>
-
-            <button
-              className="close-sidebar"
-              onClick={() => setSidebarOpen(false)}
-            >
-              <X size={20} />
-            </button>
           </div>
 
-          <button className="new-chat" onClick={newChat}>
-            <Plus size={19} />
-            New Chat
+          <button
+            className="sidebar-close"
+            onClick={() => setSidebarOpen(false)}
+          >
+            <X size={19} />
           </button>
         </div>
 
-        <div className="sidebar-middle">
-          <div className="side-label">YOUR SPACE</div>
+        <button className="new-chat" onClick={createChat}>
+          <Plus size={18} />
+          New Chat
+        </button>
 
-          <div className="empty-history">
-            <div className="history-icon">
-              <Sparkles size={17} />
+        <div className="history-section">
+          <div className="section-title">RECENT CHATS</div>
+
+          {chats.length === 0 ? (
+            <div className="empty-history">
+              <MessageSquare size={18} />
+              <span>No conversations yet</span>
             </div>
+          ) : (
+            <div className="history-list">
+              {chats.map((chat) => (
+                <div
+                  key={chat.id}
+                  className={`history-item ${
+                    chat.id === activeChatId ? "active" : ""
+                  }`}
+                  onClick={() => selectChat(chat.id)}
+                >
+                  <MessageSquare size={15} />
 
-            <span>Your conversations</span>
-            <small>New chats will appear here</small>
-          </div>
+                  <span>{chat.title}</span>
+
+                  <button
+                    className="delete-chat"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      deleteChat(chat.id);
+                    }}
+                    title="Delete chat"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="sidebar-bottom">
           <button
             className="theme-button"
-            onClick={() => setDarkMode(!darkMode)}
+            onClick={() => setDarkMode((prev) => !prev)}
           >
-            {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+            {darkMode ? <Sun size={17} /> : <Moon size={17} />}
             {darkMode ? "Light Mode" : "Dark Mode"}
           </button>
 
-          <div className="sidebar-footer">
-            <div className="mini-logo">L</div>
+          <button className="logout-button" onClick={logout}>
+            <LogOut size={17} />
+            Sign Out
+          </button>
+
+          <div className="sidebar-user">
+            <div className="user-circle">
+              {user?.name?.charAt(0)?.toUpperCase() || "L"}
+            </div>
 
             <div>
-              <strong>Lumi AI</strong>
-              <span>Personal AI Assistant</span>
+              <strong>{user?.name || "Lumi User"}</strong>
+              <span>{user?.email || "Personal workspace"}</span>
             </div>
           </div>
         </div>
@@ -162,12 +483,12 @@ function App() {
               className="mobile-menu"
               onClick={() => setSidebarOpen(true)}
             >
-              <Menu size={22} />
+              <Menu size={21} />
             </button>
 
             <div className="mobile-brand">
-              <div className="mobile-logo">
-                <Sparkles size={17} />
+              <div className="mobile-brand-logo">
+                <Sparkles size={15} />
               </div>
 
               <div>
@@ -179,16 +500,16 @@ function App() {
 
           <div className="topbar-actions">
             <button
-              className="top-icon"
-              onClick={newChat}
+              className="topbar-button"
+              onClick={createChat}
               title="New Chat"
             >
               <Plus size={19} />
             </button>
 
             <button
-              className="top-icon"
-              onClick={() => setDarkMode(!darkMode)}
+              className="topbar-button"
+              onClick={() => setDarkMode((prev) => !prev)}
               title="Theme"
             >
               {darkMode ? <Sun size={19} /> : <Moon size={19} />}
@@ -199,35 +520,36 @@ function App() {
         <main className="chat-area">
           {messages.length === 0 ? (
             <div className="welcome">
-              <div className="lumi-orb">
-                <div className="orb-inner">
-                  <Sparkles size={34} />
-                </div>
+              <div className="welcome-icon">
+                <Sparkles size={29} />
               </div>
 
-              <div className="welcome-badge">
-                <Sparkles size={14} />
-                Your AI Assistant
+              <div className="welcome-label">
+                <span />
+                LUMI AI ASSISTANT
+                <span />
               </div>
 
               <h2>
-                Hello, I'm <span>Lumi</span>
+                What can I
+                <br />
+                help you with?
               </h2>
 
               <p>
-                Ask me anything. Let's explore ideas, solve problems,
-                learn new things and create something amazing together.
+                Ask questions, explore ideas, learn something new,
+                write code or simply start a conversation.
               </p>
 
               <div className="suggestions">
-                {suggestions.map((item, index) => (
+                {suggestions.map((suggestion) => (
                   <button
-                    key={index}
+                    key={suggestion}
                     className="suggestion-card"
-                    onClick={() => setMessage(item)}
+                    onClick={() => sendMessage(suggestion)}
                   >
-                    <span>{item}</span>
-                    <Send size={15} />
+                    <span>{suggestion}</span>
+                    <ArrowUp size={16} />
                   </button>
                 ))}
               </div>
@@ -236,7 +558,7 @@ function App() {
             <div className="messages-container">
               {messages.map((item, index) => (
                 <div
-                  key={index}
+                  key={`${item.role}-${index}`}
                   className={`message-row ${
                     item.role === "user"
                       ? "user-row"
@@ -244,8 +566,8 @@ function App() {
                   }`}
                 >
                   {item.role === "assistant" && (
-                    <div className="avatar assistant-avatar">
-                      <Sparkles size={17} />
+                    <div className="assistant-avatar">
+                      <Sparkles size={16} />
                     </div>
                   )}
 
@@ -263,46 +585,43 @@ function App() {
                         className="copy-button"
                         onClick={() => copyMessage(item.content)}
                       >
-                        <Copy size={14} />
+                        <Copy size={13} />
                         Copy
                       </button>
                     )}
                   </div>
-
-                  {item.role === "user" && (
-                    <div className="avatar user-avatar">
-                      You
-                    </div>
-                  )}
                 </div>
               ))}
 
               {loading && (
                 <div className="message-row assistant-row">
-                  <div className="avatar assistant-avatar">
-                    <Sparkles size={17} />
+                  <div className="assistant-avatar">
+                    <Sparkles size={16} />
                   </div>
 
                   <div className="message-content">
                     <div className="message-name">Lumi</div>
 
-                    <div className="typing-box">
-                      <span></span>
-                      <span></span>
-                      <span></span>
+                    <div className="typing">
+                      <span />
+                      <span />
+                      <span />
                     </div>
                   </div>
                 </div>
               )}
+
+              <div ref={messagesEndRef} />
             </div>
           )}
         </main>
 
-        <div className="input-area">
-          <div className="input-wrapper">
+        <div className="composer-area">
+          <div className="composer">
             <textarea
+              ref={textareaRef}
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={handleInput}
               onKeyDown={handleKeyDown}
               placeholder="Message Lumi..."
               rows="1"
@@ -310,15 +629,15 @@ function App() {
 
             <button
               className="send-button"
-              onClick={sendMessage}
+              onClick={() => sendMessage()}
               disabled={loading || !message.trim()}
             >
-              <Send size={19} />
+              <ArrowUp size={19} />
             </button>
           </div>
 
-          <div className="input-footer">
-            <span>Press Enter to send</span>
+          <div className="composer-footer">
+            <span>Enter to send</span>
             <span>Shift + Enter for new line</span>
           </div>
         </div>
@@ -328,3 +647,4 @@ function App() {
 }
 
 export default App;
+
